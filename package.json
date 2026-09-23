@@ -18,8 +18,8 @@
     "manifest-v3",
     "web-speech-api"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "Aymen Soussi",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/chrome": "^0.0.308",
     "@types/node": "^22.13.9",

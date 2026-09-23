@@ -3,14 +3,16 @@
  * Dedicated audio module ensuring warm, natural, human-sounding speech output.
  * 
  * Strict TypeScript implementation with:
+ * - Ultra-realistic Microsoft Neural TTS (Aria / Guy / Jenny) as primary high-fidelity engine.
+ * - Automatic seamless fallback to browser Web Speech API (SpeechSynthesis).
  * - Asynchronous voice discovery with voiceschanged fallback.
  * - Strict voice priority filtering (Microsoft Natural -> Google Natural -> OS Enhanced).
  * - Calibrated rate (0.95) and pitch (1.0) for natural conversational cadence.
  * - Sentence-level queuing with instant interruption / abort handling.
- * - Chrome SpeechSynthesis keepalive mechanism.
  */
 
 import type { SpeakOptions, VoiceEngineOptions, VoiceQueueItem } from './types/index.js';
+import { EdgeTTS, NEURAL_VOICES, type EdgeVoice } from './edge-tts.ts';
 
 export class VoiceEngine {
   private synth: SpeechSynthesis | null = null;
@@ -18,11 +20,14 @@ export class VoiceEngine {
   public pitch: number;
   public volume: number;
 
+  public edgeTTS: EdgeTTS = new EdgeTTS();
+  public useNeuralVoice: boolean = true;
+
   private selectedVoice: SpeechSynthesisVoice | null = null;
   private availableVoices: SpeechSynthesisVoice[] = [];
   private voiceReadyPromise: Promise<SpeechSynthesisVoice[]> | null = null;
 
-  // Queue state
+  // Queue state for Web Speech API fallback
   private queue: VoiceQueueItem[] = [];
   public isSpeaking: boolean = false;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
@@ -102,7 +107,37 @@ export class VoiceEngine {
   }
 
   /**
-   * Prioritizes natural-sounding free voices in strict hierarchy:
+   * Returns list of neural voices available.
+   */
+  public getNeuralVoices(): EdgeVoice[] {
+    return NEURAL_VOICES;
+  }
+
+  /**
+   * Sets the active neural voice.
+   */
+  public setNeuralVoice(voiceId: string): boolean {
+    const exists = NEURAL_VOICES.some((v) => v.id === voiceId);
+    if (exists) {
+      this.edgeTTS.selectedVoiceId = voiceId;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Returns a user-friendly label of the currently active voice.
+   */
+  public getActiveVoiceLabel(): string {
+    if (this.useNeuralVoice) {
+      const v = NEURAL_VOICES.find((voice) => voice.id === this.edgeTTS.selectedVoiceId);
+      return v ? `${v.name}` : 'Aria (Natural Neural)';
+    }
+    return this.selectedVoice ? `${this.selectedVoice.name} (${this.selectedVoice.lang})` : 'System Default';
+  }
+
+  /**
+   * Prioritizes natural-sounding free voices in strict hierarchy for local fallback:
    * 1. Voices containing "Natural" (e.g., Microsoft Aria/Guy Online Natural)
    * 2. Voices containing "Google US English" or "Google UK English Female"
    * 3. Premium or Enhanced OS voices (e.g., Samantha, Daniel on macOS)
@@ -195,7 +230,7 @@ export class VoiceEngine {
   }
 
   /**
-   * Speaks the provided text naturally with sentence queueing and interruption handling.
+   * Speaks the provided text naturally with neural synthesis and sentence queueing fallback.
    */
   public async speak(text: string, options: SpeakOptions = {}): Promise<void> {
     const {
@@ -203,8 +238,6 @@ export class VoiceEngine {
       onSentenceStart = undefined,
       onComplete = undefined,
     } = options;
-
-    await this.initVoices();
 
     if (!text || !text.trim()) {
       if (onComplete) onComplete();
@@ -214,6 +247,51 @@ export class VoiceEngine {
     if (interrupt) {
       this.cancel();
     }
+
+    // 1. Primary: Real near-human Neural TTS
+    if (this.useNeuralVoice && typeof window !== 'undefined' && 'WebSocket' in window) {
+      try {
+        this.isSpeaking = true;
+        if (this.onStartCallback) {
+          this.onStartCallback(text);
+        }
+        if (onSentenceStart) {
+          onSentenceStart(text);
+        }
+
+        await this.edgeTTS.speak(text, {
+          rate: this.rate,
+          onStart: () => {
+            this.isSpeaking = true;
+          },
+          onEnd: () => {
+            this.isSpeaking = false;
+            if (this.onEndCallback) this.onEndCallback();
+            if (onComplete) onComplete();
+          },
+        });
+        return;
+      } catch (neuralErr) {
+        console.warn('[VoiceEngine] Neural speech stream note, using Web Speech API fallback:', neuralErr);
+        this.edgeTTS.stop();
+        this.isSpeaking = false;
+      }
+    }
+
+    // 2. Fallback: Browser local Web Speech API
+    return this.speakLocal(text, options);
+  }
+
+  /**
+   * Local SpeechSynthesis playback queue.
+   */
+  private async speakLocal(text: string, options: SpeakOptions = {}): Promise<void> {
+    const {
+      onSentenceStart = undefined,
+      onComplete = undefined,
+    } = options;
+
+    await this.initVoices();
 
     const sentences = this.splitIntoSentences(text);
     if (sentences.length === 0) {
@@ -292,7 +370,7 @@ export class VoiceEngine {
 
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
       if (event.error !== 'interrupted' && event.error !== 'canceled') {
-        console.warn('[VoiceEngine] Speech synthesis error:', event.error);
+        console.warn('[VoiceEngine] Local speech synthesis error:', event.error);
       }
       if (item.onComplete) {
         item.onComplete();
@@ -308,9 +386,10 @@ export class VoiceEngine {
   }
 
   /**
-   * Instantly stops speech synthesis and clears the queue.
+   * Instantly stops speech synthesis and clears both neural and local queues.
    */
   public cancel(): void {
+    this.edgeTTS.stop();
     this.queue = [];
     if (this.synth) {
       this.synth.cancel();
@@ -323,6 +402,9 @@ export class VoiceEngine {
   }
 
   public pause(): void {
+    if (this.edgeTTS.getIsPlaying()) {
+      this.edgeTTS.stop();
+    }
     if (this.synth && this.isSpeaking) {
       this.synth.pause();
     }

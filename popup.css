@@ -442,11 +442,26 @@ body {
 .voice-info {
   display: flex;
   align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
+  gap: 6px;
+  max-width: 240px;
+}
+
+.voice-select {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  max-width: 190px;
+}
+
+.voice-select:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary-glow);
 }
 
 .footer-btn {

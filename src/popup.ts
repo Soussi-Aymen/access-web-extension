@@ -63,7 +63,7 @@ export class PopupController {
     actionCountBadge: document.getElementById('actionCountBadge') as HTMLElement,
     transcriptSection: document.getElementById('transcriptSection') as HTMLElement,
     actionsList: document.getElementById('actionsList') as HTMLElement,
-    activeVoiceLabel: document.getElementById('activeVoiceLabel') as HTMLElement,
+    voiceSelect: document.getElementById('voiceSelect') as HTMLSelectElement,
     testVoiceBtn: document.getElementById('testVoiceBtn') as HTMLButtonElement,
     helpModal: document.getElementById('helpModal') as HTMLElement,
     closeModalBtn: document.getElementById('closeModalBtn') as HTMLButtonElement,
@@ -95,17 +95,21 @@ export class PopupController {
 
   private async initVoiceSelector(): Promise<void> {
     try {
-      await this.voiceEngine.initVoices();
-      const currentVoice = this.voiceEngine.getCurrentVoice();
-      if (currentVoice) {
-        this.dom.activeVoiceLabel.textContent = `${currentVoice.name} (${currentVoice.lang})`;
-        this.dom.activeVoiceLabel.title = `Using ${currentVoice.name}`;
-      } else {
-        this.dom.activeVoiceLabel.textContent = 'Default System Voice';
+      if (this.dom.voiceSelect) {
+        this.dom.voiceSelect.value = this.voiceEngine.edgeTTS.selectedVoiceId;
+        this.dom.voiceSelect.addEventListener('change', () => {
+          const val = this.dom.voiceSelect.value;
+          if (val === 'system') {
+            this.voiceEngine.useNeuralVoice = false;
+          } else {
+            this.voiceEngine.useNeuralVoice = true;
+            this.voiceEngine.setNeuralVoice(val);
+          }
+        });
       }
+      await this.voiceEngine.initVoices();
     } catch (err) {
       console.warn('[Popup] Voice init note:', err);
-      this.dom.activeVoiceLabel.textContent = 'Audio Active';
     }
   }
 

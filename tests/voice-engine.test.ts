@@ -50,4 +50,26 @@ describe('VoiceEngine', () => {
     assert.equal(engine.rate, 0.95);
     assert.equal(engine.pitch, 1.0);
   });
+
+  it('generates a valid 64-character uppercase SHA-256 Sec-MS-GEC DRM token', async () => {
+    const { EdgeTTS } = await import('../src/edge-tts.ts');
+    const token = await EdgeTTS.generateSecMsGec();
+    assert.equal(typeof token, 'string');
+    assert.equal(token.length, 64);
+    assert.match(token, /^[0-9A-F]{64}$/);
+  });
+
+  it('allows selecting neural voices and toggling engine mode', async () => {
+    const engine = new VoiceEngine();
+    assert.equal(engine.useNeuralVoice, true);
+    assert.equal(engine.edgeTTS.selectedVoiceId, 'en-US-AriaNeural');
+
+    const changed = engine.setNeuralVoice('en-US-GuyNeural');
+    assert.equal(changed, true);
+    assert.equal(engine.edgeTTS.selectedVoiceId, 'en-US-GuyNeural');
+
+    const label = engine.getActiveVoiceLabel();
+    assert.equal(label, 'Guy (Natural Neural)');
+  });
 });
+

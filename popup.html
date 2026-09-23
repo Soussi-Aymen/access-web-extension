@@ -107,9 +107,16 @@
 
   <!-- Footer with Voice Selection Info -->
   <footer class="app-footer" role="contentinfo">
-    <div class="voice-info" title="Active Speech Synthesis Voice">
+    <div class="voice-info">
+      <label for="voiceSelect" class="sr-only">Choose Voice</label>
       <span aria-hidden="true">🎙️</span>
-      <span id="activeVoiceLabel">Detecting natural voice...</span>
+      <select id="voiceSelect" class="voice-select" aria-label="Select speech voice">
+        <option value="en-US-AriaNeural">Aria (Natural Neural)</option>
+        <option value="en-US-GuyNeural">Guy (Natural Neural)</option>
+        <option value="en-US-JennyNeural">Jenny (Natural Neural)</option>
+        <option value="en-GB-SoniaNeural">Sonia (British Neural)</option>
+        <option value="system">System Local Voice</option>
+      </select>
     </div>
     <button id="testVoiceBtn" class="footer-btn" type="button">Test Voice</button>
   </footer>

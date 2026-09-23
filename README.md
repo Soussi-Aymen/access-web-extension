@@ -1,7 +1,9 @@
-# a11y-pilot 🎙️♿
-
-> **Production-Ready Conversational Voice-Controlled Chrome Extension (Manifest V3)**  
-> Built with **100% Pure TypeScript 7 (Strict Mode)**, **Vite 8**, **pnpm**, and the **Web Speech API**.
+<div align="center">
+  <img src="public/icons/icon128.png" width="96" height="96" alt="a11y-pilot logo" />
+  <h1>a11y-pilot</h1>
+  <p><strong>Conversational Voice-Controlled Chrome Extension (Manifest V3)</strong></p>
+  <p><em>Empowering web accessibility through natural voice dialogue</em></p>
+</div>
 
 ---
 

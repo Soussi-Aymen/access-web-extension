@@ -1,0 +1,29 @@
+{
+  "name": "a11y-pilot",
+  "version": "1.0.0",
+  "description": "Voice-controlled web accessibility assistant that navigates and executes actions through natural conversation.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "generate:icons": "node --experimental-strip-types scripts/generate-icons.ts"
+  },
+  "keywords": [
+    "chrome-extension",
+    "accessibility",
+    "a11y",
+    "voice-control",
+    "manifest-v3",
+    "web-speech-api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.308",
+    "@types/node": "^22.13.9",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

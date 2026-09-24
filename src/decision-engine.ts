@@ -560,11 +560,45 @@ export class DecisionEngine {
       }
     }
 
-    // 6. DIRECT ID / NUMBER SELECTION INTENT
-    const numberMatch = text.match(/(?:element|number|button|item|link|id|select|click)?\s*#?(\d+)/i);
-    if (numberMatch && numberMatch[1]) {
-      const requestedId = parseInt(numberMatch[1], 10);
-      const targetById = elements.find((el) => el.id === requestedId);
+    // 6. DIRECT ID, NUMBER, OR ORDINAL SELECTION INTENT
+    // Supports digits ("1", "number 2", "#3"), words ("one", "two"), ordinals ("first", "second"), and "option 1"
+    const WORD_TO_NUM: Record<string, number> = {
+      one: 1, first: 1, 'the first': 1, 'first one': 1, 'the first one': 1, 'option 1': 1, 'option one': 1,
+      two: 2, second: 2, 'the second': 2, 'second one': 2, 'the second one': 2, 'option 2': 2, 'option two': 2,
+      three: 3, third: 3, 'the third': 3, 'third one': 3, 'the third one': 3, 'option 3': 3, 'option three': 3,
+      four: 4, fourth: 4, 'the fourth': 4,
+      five: 5, fifth: 5, 'the fifth': 5,
+      six: 6, sixth: 6,
+      seven: 7, seventh: 7,
+      eight: 8, eighth: 8,
+      nine: 9, ninth: 9,
+      ten: 10, tenth: 10,
+    };
+
+    let requestedId: number | null = null;
+    const directDigitMatch = text.match(/^(?:element|number|button|item|link|id|select|click|choose|option)?\s*#?(\d+)$/i);
+    if (directDigitMatch && directDigitMatch[1]) {
+      requestedId = parseInt(directDigitMatch[1], 10);
+    } else {
+      const embeddedDigitMatch = text.match(/\b(?:number|option|id|#)\s*(\d+)\b/i);
+      if (embeddedDigitMatch && embeddedDigitMatch[1]) {
+        requestedId = parseInt(embeddedDigitMatch[1], 10);
+      } else {
+        // Check word numbers or ordinals
+        const cleanChoice = text.replace(/^(?:click|choose|select|pick|press|view|go to|take)\s+/i, '').trim();
+        if (WORD_TO_NUM[cleanChoice] !== undefined) {
+          requestedId = WORD_TO_NUM[cleanChoice]!;
+        }
+      }
+    }
+
+    if (requestedId !== null) {
+      // Find element by exact element ID, or if not found by ID and ID <= elements.length, by 1-based index
+      let targetById = elements.find((el) => el.id === requestedId);
+      if (!targetById && requestedId >= 1 && requestedId <= elements.length) {
+        targetById = elements[requestedId - 1];
+      }
+
       if (targetById) {
         if (DecisionEngine.isRiskyAction(targetById)) {
           return {
@@ -589,7 +623,7 @@ export class DecisionEngine {
             targetName: targetById.name,
           },
           confidence: 0.99,
-          explanation: `Explicit element ID ${requestedId} requested (${targetById.name}).`,
+          explanation: `Explicit element ID ${targetById.id} requested (${targetById.name}).`,
           spokenResponse: `Clicking ${targetById.name}.`,
         };
       }

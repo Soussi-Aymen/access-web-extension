@@ -56,6 +56,9 @@ export class PopupController {
   private pendingConfirmAction: AgentAction | null = null;
   private confirmTimeoutId: any = null;
 
+  // Disambiguation pending state
+  private pendingDisambiguationCandidates: ActionableElement[] | null = null;
+
   // Voice macro recording state
   private recordingMacroName: string | null = null;
   private recordedCommands: string[] = [];
@@ -424,6 +427,71 @@ export class PopupController {
       }
     }
 
+    // 1b. Disambiguation check if user was asked to pick between options
+    if (this.pendingDisambiguationCandidates && this.pendingDisambiguationCandidates.length > 0) {
+      const candidates = this.pendingDisambiguationCandidates;
+      let matchedCandidate: ActionableElement | null = null;
+
+      // Check direct number / digit
+      const numMatch = trimmedLower.match(/^(?:element|number|option|item|#)?\s*#?(\d+)$/i);
+      if (numMatch && numMatch[1]) {
+        const parsed = parseInt(numMatch[1], 10);
+        // Direct ID match
+        matchedCandidate = candidates.find((c) => c.id === parsed) || null;
+        // 1-based index among candidates if not matched by ID
+        if (!matchedCandidate && parsed >= 1 && parsed <= candidates.length) {
+          matchedCandidate = candidates[parsed - 1] || null;
+        }
+      }
+
+      // Check ordinals: first, second, 1st, 2nd
+      if (!matchedCandidate) {
+        if (/^(first|the first|first one|1st|option 1|one)$/i.test(trimmedLower)) {
+          matchedCandidate = candidates[0] || null;
+        } else if (/^(second|the second|second one|2nd|option 2|two)$/i.test(trimmedLower)) {
+          matchedCandidate = candidates[1] || null;
+        }
+      }
+
+      // Check candidate names
+      if (!matchedCandidate) {
+        matchedCandidate = DecisionEngine.findBestMatch(trimmedLower, candidates);
+      }
+
+      if (matchedCandidate) {
+        this.pendingDisambiguationCandidates = null;
+        // Execute the matched candidate
+        if (this.activeTabId) {
+          try {
+            await chrome.tabs.sendMessage(this.activeTabId, {
+              type: 'A11Y_EXECUTE_ACTION',
+              action: {
+                type: 'click',
+                id: matchedCandidate.id,
+                targetName: matchedCandidate.name,
+              },
+            });
+          } catch (err) {
+            console.error('[Popup] Disambiguation candidate execution error:', err);
+          }
+        }
+
+        const msg = `Clicking ${matchedCandidate.name}.`;
+        this.appendMessage('agent', msg);
+        await this.voiceEngine.speak(msg);
+
+        await this.waitForPageToSettle();
+        await this.connectAndScanActiveTab(false, false);
+
+        if (this.isListening) {
+          this.updateStatus('listening', 'Listening...');
+        } else {
+          this.updateStatus('ready', 'Ready');
+        }
+        return;
+      }
+    }
+
     const subCommands = DecisionEngine.splitUtteranceIntoCommands(
       userUtterance,
       this.currentElements,
@@ -524,6 +592,14 @@ export class PopupController {
           }
           break;
         }
+      }
+
+      // Handle DISAMBIGUATE intent
+      if (decision.intent === 'DISAMBIGUATE') {
+        this.pendingDisambiguationCandidates = decision.ambiguousCandidates || null;
+        this.appendMessage('agent', decision.spokenResponse);
+        await this.voiceEngine.speak(decision.spokenResponse);
+        break;
       }
 
       // Handle CONFIRM intent for risky actions

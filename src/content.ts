@@ -215,13 +215,21 @@ declare global {
     if (explicitRole === 'textbox') return 'textbox';
     if (explicitRole === 'combobox') return 'combobox';
     if (explicitRole === 'checkbox' || explicitRole === 'switch') return 'checkbox';
+    if (explicitRole === 'tab' || explicitRole === 'menuitem' || explicitRole === 'treeitem') {
+      return el.hasAttribute('href') ? 'link' : 'button';
+    }
 
     if (tagName === 'button' || tagName === 'summary') {
       return 'button';
     }
 
-    if (tagName === 'a' && el.hasAttribute('href')) {
+    if (tagName === 'a') {
       return 'link';
+    }
+
+    // Interactive custom widgets with tabindex or onclick
+    if (el.hasAttribute('onclick') || (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1')) {
+      return 'button';
     }
 
     if (tagName === 'select') {
@@ -441,22 +449,42 @@ declare global {
     ensureHighlightStyles();
 
     const candidateSelectors = [
+      'nav a',
+      'nav button',
+      '[role="navigation"] a',
+      '[role="navigation"] button',
+      'header a',
+      'header button',
       'button',
-      'a[href]',
+      'a',
       'input',
       'select',
       'textarea',
       'summary',
       '[role="button"]',
       '[role="link"]',
+      '[role="tab"]',
+      '[role="menuitem"]',
+      '[role="treeitem"]',
       '[role="searchbox"]',
       '[role="textbox"]',
       '[role="combobox"]',
       '[role="checkbox"]',
       '[role="switch"]',
+      '[tabindex]:not([tabindex="-1"])',
     ].join(',');
 
-    const candidates = Array.from(document.querySelectorAll(candidateSelectors)) as HTMLElement[];
+    const rawCandidates = Array.from(document.querySelectorAll(candidateSelectors)) as HTMLElement[];
+    // Remove duplicate elements while preserving order
+    const candidateSet = new Set<HTMLElement>();
+    const candidates: HTMLElement[] = [];
+    for (const el of rawCandidates) {
+      if (!candidateSet.has(el)) {
+        candidateSet.add(el);
+        candidates.push(el);
+      }
+    }
+
     const extracted: ActionableElement[] = [];
     let currentId = 1;
 
@@ -502,7 +530,7 @@ declare global {
 
       currentId++;
 
-      if (extracted.length >= 75) {
+      if (extracted.length >= 150) {
         break;
       }
     }
@@ -581,10 +609,70 @@ declare global {
 
     if (type === 'click') {
       targetElement.focus();
-      const mouseEventInit = { bubbles: true, cancelable: true, view: window };
-      targetElement.dispatchEvent(new MouseEvent('mousedown', mouseEventInit));
-      targetElement.dispatchEvent(new MouseEvent('mouseup', mouseEventInit));
-      targetElement.click();
+
+      // Checkbox or switch toggle support
+      const isCheckboxOrSwitch = (
+        (targetElement instanceof HTMLInputElement && targetElement.type === 'checkbox') ||
+        targetElement.getAttribute('role') === 'checkbox' ||
+        targetElement.getAttribute('role') === 'switch'
+      );
+
+      if (isCheckboxOrSwitch && targetElement instanceof HTMLInputElement) {
+        targetElement.checked = !targetElement.checked;
+        targetElement.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        targetElement.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      } else if (isCheckboxOrSwitch) {
+        const currentChecked = targetElement.getAttribute('aria-checked') === 'true';
+        targetElement.setAttribute('aria-checked', String(!currentChecked));
+      }
+
+      // Complete pointer and mouse event dispatch sequence for maximum framework/SPA compatibility
+      const eventInit = { bubbles: true, cancelable: true, view: window };
+      try {
+        if (typeof PointerEvent !== 'undefined') {
+          targetElement.dispatchEvent(new PointerEvent('pointerdown', eventInit));
+          targetElement.dispatchEvent(new MouseEvent('mousedown', eventInit));
+          targetElement.dispatchEvent(new PointerEvent('pointerup', eventInit));
+          targetElement.dispatchEvent(new MouseEvent('mouseup', eventInit));
+        } else {
+          targetElement.dispatchEvent(new MouseEvent('mousedown', eventInit));
+          targetElement.dispatchEvent(new MouseEvent('mouseup', eventInit));
+        }
+      } catch {
+        // Fallback if PointerEvent constructor fails
+      }
+
+      // Perform primary click invocation
+      try {
+        targetElement.click();
+      } catch (err) {
+        console.warn('[Content] targetElement.click() threw:', err);
+      }
+
+      // Anchor fallback for links with valid href if standard click didn't initiate navigation
+      const anchor = (targetElement instanceof HTMLAnchorElement ? targetElement : targetElement.closest('a')) as HTMLAnchorElement | null;
+      if (anchor && anchor !== targetElement) {
+        try {
+          anchor.click();
+        } catch {
+          // Ignore if anchor.click fails
+        }
+      }
+
+      if (anchor && anchor.href && !anchor.href.startsWith('javascript:') && !anchor.href.startsWith('#')) {
+        // Let standard event queue process first, but ensure navigation if not prevented
+        const targetUrl = anchor.href;
+        setTimeout(() => {
+          if (window.location.href !== targetUrl && !targetUrl.includes(window.location.hash)) {
+            // Only follow if target window is same and page didn't navigate
+            if (!anchor.target || anchor.target === '_self') {
+              window.location.href = targetUrl;
+            } else if (anchor.target === '_blank') {
+              window.open(targetUrl, '_blank');
+            }
+          }
+        }, 150);
+      }
 
       const name = computeAccessibleName(targetElement) || 'element';
       return { success: true, message: `Clicked ${name}.` };
@@ -594,6 +682,9 @@ declare global {
       targetElement.focus();
       if (targetElement instanceof HTMLInputElement || targetElement instanceof HTMLTextAreaElement) {
         setNativeInputValue(targetElement, value || '');
+      } else if (targetElement.isContentEditable) {
+        targetElement.textContent = value || '';
+        targetElement.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
       }
       const name = computeAccessibleName(targetElement) || 'input';
       return { success: true, message: `Entered "${value}" into ${name}.` };
@@ -603,6 +694,9 @@ declare global {
       targetElement.focus();
       if (targetElement instanceof HTMLInputElement || targetElement instanceof HTMLTextAreaElement) {
         setNativeInputValue(targetElement, value || '');
+      } else if (targetElement.isContentEditable) {
+        targetElement.textContent = value || '';
+        targetElement.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
       }
 
       const keyInit = {
@@ -623,7 +717,11 @@ declare global {
         if (submitBtn) {
           submitBtn.click();
         } else if (typeof form.requestSubmit === 'function') {
-          form.requestSubmit();
+          try {
+            form.requestSubmit();
+          } catch {
+            form.submit();
+          }
         } else {
           form.submit();
         }

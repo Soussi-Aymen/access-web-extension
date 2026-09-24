@@ -222,4 +222,46 @@ describe('DecisionEngine', () => {
     assert.equal(deleteMacro.macroAction, 'delete');
     assert.equal(deleteMacro.macroName, 'checkout flow');
   });
+
+  it('supports ordinals, word numbers, and option selections without getting stuck', () => {
+    // "first", "the first one", "option 1", "one"
+    const firstDecision = DecisionEngine.parseIntent('first', mockElements, mockContext);
+    assert.equal(firstDecision.intent, 'CLICK_BY_ID');
+    assert.equal(firstDecision.action.id, 1);
+
+    const secondDecision = DecisionEngine.parseIntent('the second one', mockElements, mockContext);
+    assert.equal(secondDecision.intent, 'CLICK_BY_ID');
+    assert.equal(secondDecision.action.id, 2);
+
+    const optionDecision = DecisionEngine.parseIntent('option 2', mockElements, mockContext);
+    assert.equal(optionDecision.intent, 'CLICK_BY_ID');
+    assert.equal(optionDecision.action.id, 2);
+
+    const wordDecision = DecisionEngine.parseIntent('choose three', mockElements, mockContext);
+    assert.equal(wordDecision.intent, 'CLICK_BY_ID');
+    assert.equal(wordDecision.action.id, 3);
+  });
+
+  it('accurately resolves sibling navigation items like golf and tennis', () => {
+    const navElements: ActionableElement[] = [
+      { id: 1, role: 'link', name: 'Football' },
+      { id: 2, role: 'link', name: 'Tennis' },
+      { id: 3, role: 'link', name: 'Basketball' },
+      { id: 4, role: 'link', name: 'Hockey' },
+      { id: 5, role: 'link', name: 'Golf' },
+      { id: 6, role: 'link', name: 'Cricket' },
+    ];
+
+    const tennisMatch = DecisionEngine.parseIntent('tennis', navElements, mockContext);
+    assert.equal(tennisMatch.intent, 'CLICK');
+    assert.equal(tennisMatch.action.id, 2);
+
+    const golfMatch = DecisionEngine.parseIntent('golf', navElements, mockContext);
+    assert.equal(golfMatch.intent, 'CLICK');
+    assert.equal(golfMatch.action.id, 5);
+
+    const clickGolf = DecisionEngine.parseIntent('click golf', navElements, mockContext);
+    assert.equal(clickGolf.intent, 'CLICK');
+    assert.equal(clickGolf.action.id, 5);
+  });
 });

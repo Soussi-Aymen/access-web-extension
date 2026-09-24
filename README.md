@@ -46,6 +46,20 @@ pnpm build
 
 ---
 
+### 3. 🎤 Enable Microphone Access (One-Time Setup)
+
+To allow **a11y-pilot** to listen to your voice:
+
+1. In Google Chrome, go to:
+   ```text
+   chrome://settings/content/microphone
+   ```
+2. Make sure **"Sites can ask to use your microphone"** is selected.
+3. Under **"Allowed to use your microphone"**, find **a11y-pilot** (or its extension ID) and set it to **Allow**.
+4. You're all set! Now you can click **"Start Listening"** (or press <kbd>Space</kbd>) and talk naturally to browse.
+
+---
+
 ## 💡 What is a11y-pilot? (Quick Summary)
 
 **a11y-pilot** allows anyone to browse websites and trigger actions entirely using natural voice conversation. 

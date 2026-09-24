@@ -2,168 +2,174 @@
   <img src="public/icons/icon128.png" width="96" height="96" alt="a11y-pilot logo" />
   <h1>a11y-pilot</h1>
   <p><strong>Conversational Voice-Controlled Chrome Extension (Manifest V3)</strong></p>
-  <p><em>Empowering web accessibility through natural voice dialogue</em></p>
+  <p><em>Designed to be simple, accessible, and understandable for everyone.</em></p>
 </div>
 
 ---
 
-## 🎯 Core Mission
+## ⚡ Super-Quick Start (From Zero to Running in Chrome)
 
-Instead of injecting clunky DOM overlays or rewriting web page markup, **a11y-pilot** inspects the page's interactive accessibility hierarchy, summarizes available actions in warm conversational language, and empowers users with visual impairments or motor disabilities to browse and trigger actions naturally through voice commands.
+> [!NOTE]
+> Designed for ease of use! If you are participating in the hackathon, using a screen reader, or have any accessibility needs, follow these step-by-step commands to get the extension up and running in less than 2 minutes.
+
+### 1. Copy & Run These Commands in Your Terminal
+
+```bash
+# Step 1: Clone the repository
+git clone https://github.com/Soussi-Aymen/access-web-extension.git
+
+# Step 2: Enter the project folder
+cd access-web-extension
+
+# Step 3: Install dependencies (pnpm or npm)
+pnpm install
+# Note: If you do not have pnpm installed, run: npm install -g pnpm
+
+# Step 4: Build the project (creates the 'dist' folder)
+pnpm build
+```
 
 ---
 
-## 🏗️ Architecture & Tech Stack
+### 2. How to Load the `dist/` Folder into Google Chrome
+
+1. **Open Google Chrome** and in the address bar, type or paste:
+   ```text
+   chrome://extensions/
+   ```
+   and press <kbd>Enter</kbd>.
+2. Look at the **top right corner** and switch on the **Developer mode** toggle.
+3. Look at the **top left corner** and click the button labeled **Load unpacked**.
+4. In the file picker that opens, navigate into `access-web-extension` and select the **`dist`** folder, then click **Select Folder** (or **Open**).
+5. **Done!** You will see **a11y-pilot** appear in your extension list.
+6. Click the Extensions puzzle piece icon on your Chrome toolbar, pin **a11y-pilot**, and click it to open the voice panel!
+
+---
+
+## 💡 What is a11y-pilot? (Quick Summary)
+
+**a11y-pilot** allows anyone to browse websites and trigger actions entirely using natural voice conversation. 
+
+Instead of cluttering web pages or forcing you to memorize complex hotkeys, **a11y-pilot**:
+- 🎧 **Listens** to natural speech (e.g. *"Search for running shoes"*, *"Click cart"*, *"What can I do on this page?"*).
+- 🔍 **Inspects** the webpage's accessibility tree (buttons, search bars, links, inputs).
+- 🗣️ **Speaks back** in warm, natural human speech with full screen-reader friendly feedback.
+- ⚡ **Executes** actions directly on the page seamlessly.
+
+### Core Techniques Used
+- **Edge Natural Neural TTS + Web Speech Synthesis**: Gives warm, non-robotic conversational voices (free with zero API key requirement).
+- **W3C AccName 1.2 Interactive Element Inspector**: Extracts meaningful labels and interactive controls without disturbing the original page layout.
+- **Natural Language Intent Matching**: Maps human everyday phrasing to browser interactions (`SEARCH`, `CLICK`, `FILL`, `SCROLL`, `SUMMARY`).
+- **WCAG 2.1 AAA High-Contrast UI**: Designed with high contrast, scalable typography, keyboard shortcuts, and full screen-reader live alerts.
+
+---
+
+## 🛠️ Deep Technical Details & Architecture
 
 ```mermaid
 flowchart TD
     subgraph WebPage["Active Web Page"]
-        DOM[DOM & Accessibility Tree]
+        DOM["DOM & Accessibility Hierarchy"]
         CS["src/content.ts (Injected Content Script)"]
-        DOM <-->|Scan / AccName / transient IDs| CS
-        CS -->|Native clicks, inputs, forms| DOM
+        DOM <-->|Scan / AccName computation / Badging| CS
+        CS -->|Native synthetic click / input / submit| DOM
     end
 
     subgraph ExtensionPanel["Chrome Extension (Side Panel / Popup)"]
-        SR["Web Speech API (webkitSpeechRecognition)"]
-        DE["src/decision-engine.ts (Intent Parsing & Summary)"]
-        VE["src/voice-engine.ts (Natural Voice Synthesizer)"]
+        SR["Web Speech API (Speech Recognition)"]
+        DE["src/decision-engine.ts (Intent Parsing & Summarizer)"]
+        VE["src/voice-engine.ts (Hybrid Neural TTS Orchestrator)"]
         UI["Accessible WCAG AAA UI (popup.html)"]
 
-        SR -->|Voice transcript| DE
+        SR -->|Voice Transcript| DE
         DE -->|Structured Action JSON| CS
-        CS -->|Action Result / Page Tree| DE
-        DE -->|Conversational Summary| VE
-        VE -->|Warm Natural Speech| UI
+        CS -->|Action Execution Result / Element Tree| DE
+        DE -->|Conversational Summary Response| VE
+        VE -->|Human-like Audio & Live Region| UI
     end
 
     subgraph ServiceWorker["Background Service Worker"]
-        BG["src/background.ts (Side Panel & Lifecycle Manager)"]
+        BG["src/background.ts (Side Panel & Extension Lifecycle)"]
     end
 ```
 
-1. **Manifest V3 Core**:
-   - `activeTab`, `scripting`, `sidePanel` permissions.
-   - Dual interface: supports modern **Chrome Side Panel** (stays pinned during navigation) with **Popup fallback**.
-2. **Pure TypeScript 7 & Strict Mode**:
-   - Strict compiler mode enabled (`strict: true`, `noImplicitAny: true`, `strictNullChecks: true`, `noUnusedLocals: true`, `allowImportingTsExtensions: true`).
-   - Zero loose legacy `.js` files in source.
-3. **Vite 8 Bundling**:
-   - Multi-entry point bundling with relative asset resolution (`base: './'`).
-   - Sub-80ms production build times.
-4. **Voice Engine (`src/voice-engine.ts`)**:
-   - Asynchronous discovery with `voiceschanged` event handling.
-   - **Strict Natural Voice Hierarchy (Non-Robotic & Free)**:
-     1. Microsoft "Natural" neural voices (e.g. *Microsoft Aria Online Natural*, *Microsoft Guy Online Natural*).
-     2. Google Natural neural voices (*Google US English*, *Google UK English Female*).
-     3. OS Enhanced / Premium voices (*Samantha Enhanced*, *Daniel Enhanced*).
-     4. System fallback.
-   - Calibrated **Rate (0.95)** and **Pitch (1.0)** to eliminate mechanical cadence.
-   - **Clean Interruption Handling**: Instantly cancels ongoing speech when the user begins speaking.
-5. **Page Accessibility Inspector (`src/content.ts`)**:
-   - Extracts **ONLY** actionable interactive elements: `button`, `link`, `searchbox`, `textbox`, `combobox`, `checkbox`.
-   - Computes compliant accessible names following **W3C AccName 1.2** specification.
-   - Assigns transient unique `data-agent-id` badges (`1, 2, 3...`) for direct voice targeting.
-   - Dispatches native synthetic events (supporting React, Vue, Angular synthetic event loops).
-6. **Decision Engine (`src/decision-engine.ts`)**:
-   - Generates warm, conversational summaries (e.g., *"You are on Amazon. Would you like to search for a product or view your cart?"*).
-   - Maps user utterances to structured JSON actions (`fill_and_submit`, `click`, `fill`, `scroll`, `cancel`).
+### 1. Dual Speech Engine Architecture (`src/voice-engine.ts`)
+- **Tier 1 (Edge Neural Audio via WebSocket)**: Synthesizes high-fidelity Microsoft Neural voices (`en-US-AriaNeural`, `en-US-GuyNeural`, `en-GB-SoniaNeural`) using SSML and cryptographic DRM token generation (`Sec-MS-GEC`).
+- **Tier 2 (Google Neural Web TTS & Web Speech API)**: Lightweight chunked fallback ensuring crisp vocal output without mechanical artifacting across any platform.
+- **Interruption Queueing**: Instant cancellation of audio output as soon as speech recognition detects user voice input.
+
+### 2. Semantic Accessibility Tree Inspector (`src/content.ts`)
+- Implements the **W3C AccName 1.2** specification:
+  - Traverses `aria-labelledby`, `aria-label`, `<label for="...">`, element text content, and `title`/`placeholder` attributes.
+  - Filters strictly for actionable elements: `button`, `link`, `searchbox`, `textbox`, `combobox`, `checkbox`.
+  - Dispatches native browser events (`InputEvent`, `MouseEvent`, `Event('change', { bubbles: true })`) to trigger React, Vue, Angular, and Svelte component state updates.
+
+### 3. Intent & Decision Engine (`src/decision-engine.ts`)
+- Maps spoken user utterances into discrete executable actions:
+  - `SEARCH`: Identifies search input fields, types queries, and dispatches form submission.
+  - `CLICK`: Fuzzy matches element labels or targeted numbers (e.g., *"Click 2"*).
+  - `FILL`: Directs input values to appropriate textboxes.
+  - `SCROLL`: Dispatches smooth relative scrolling.
+  - `SUMMARY`: Produces conversational overview of the active page.
+  - `CANCEL`: Silences audio output immediately.
 
 ---
 
-## 📁 Clean Project Structure
+## 📂 Project Structure
 
 ```
-├── .agents/
-│   └── skills/
-│       └── karpathy-guidelines/   # Antigravity project skill
 ├── public/
 │   ├── manifest.json              # Chrome MV3 manifest
-│   └── icons/                     # Generated PNG extension icons (16, 48, 128)
+│   └── icons/                     # Generated extension icons (16, 48, 128)
 ├── src/
 │   ├── types/
-│   │   └── index.ts               # Strict TypeScript interfaces & message types
+│   │   └── index.ts               # Strict TypeScript interfaces & messages
 │   ├── voice-engine.ts            # Natural TTS synthesis & interruption queue
+│   ├── google-tts.ts              # Neural web TTS client with sentence chunking
 │   ├── decision-engine.ts         # Natural language intent parser & summarizer
 │   ├── content.ts                 # Page inspector, AccName parser, native executor
-│   ├── popup.ts                   # Primary controller for speech recognition & UI
-│   └── background.ts              # MV3 background worker (Side Panel manager)
-├── scripts/
-│   └── generate-icons.ts          # Pure TypeScript icon generator (zlib/png)
+│   ├── popup.ts                   # UI controller, mic toggle & audio feedback
+│   └── background.ts              # MV3 service worker (Side panel manager)
 ├── tests/
 │   ├── decision-engine.test.ts    # Intent dispatcher & summary unit tests
 │   └── voice-engine.test.ts       # Voice hierarchy & sentence chunking tests
-├── popup.html                     # WCAG 2.1 AAA accessible interface
-├── popup.css                      # Accessible theme with dark mode & high contrast
-├── tsconfig.json                  # TypeScript 7 strict compiler configuration
-├── vite.config.ts                 # Vite 8 multi-target extension bundler
-└── package.json                   # Scripts and dependencies
+├── popup.html                     # Accessible UI (High contrast, screen reader ready)
+├── popup.css                      # WCAG AAA compliant styles
+├── tsconfig.json                  # TypeScript 7 strict configuration
+├── vite.config.ts                 # Vite 8 multi-entry bundler
+└── package.json                   # Dependencies and npm scripts
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🗣️ Supported Voice Commands
 
-### 1. Prerequisites
-- **Node.js**: v22+ (tested on Node v24)
-- **pnpm**: v10+
+| Voice Command | Action |
+| :--- | :--- |
+| *"Search for vintage jackets"* | Fills searchbox and triggers search |
+| *"Click cart"* / *"Open settings"* | Clicks the matching interactive control |
+| *"Click 2"* / *"Select number 3"* | Targets item directly by its transient ID badge |
+| *"Type aymen@example.com in Email"* | Fills the specific form field |
+| *"Scroll down"* / *"Scroll up"* | Smoothly scrolls the viewport |
+| *"Where am I?"* / *"What can I do?"* | Speaks a conversational summary of the page |
+| *"Stop"* / *"Quiet"* | Immediately cancels speech |
 
-### 2. Install Dependencies
+---
+
+## 🤝 Contributing & Developer Commands
+
+We welcome contributions from everyone! All commands are kept simple and standard:
+
 ```bash
-pnpm install
-```
-
-### 3. Build Extension
-```bash
-pnpm build
-```
-This runs `tsc --noEmit` and bundles production assets into `dist/`.
-
-### 4. Run Tests & Typecheck
-```bash
-# Run unit tests using Node's native test runner
+# Run unit tests
 pnpm test
 
-# Run strict TypeScript typecheck
+# Check TypeScript types strictly
 pnpm typecheck
+
+# Build for production
+pnpm build
 ```
-
-### 5. Generate Extension Icons (Pure TypeScript)
-```bash
-pnpm generate:icons
-```
-
----
-
-## 🌐 Loading into Chrome
-
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Toggle on **Developer mode** in the top right corner.
-3. Click **Load unpacked**.
-4. Select the `dist/` directory generated by `pnpm build`.
-5. Click the **a11y-pilot** icon in the Chrome toolbar to open the Side Panel / Popup.
-
----
-
-## 🗣️ Supported Conversational Flow & Voice Commands
-
-| User Voice Command | Decision Engine Intent | Action Dispatched to Page |
-| :--- | :--- | :--- |
-| *"Search for vintage jackets"* | `SEARCH` | `fill_and_submit` on searchbox (ID: 1) with `"vintage jackets"` |
-| *"Click cart"* / *"View cart"* | `CLICK` | `click` on button matching "cart" |
-| *"Click 2"* / *"Number 3"* | `CLICK_BY_ID` | `click` on element by transient ID |
-| *"Type aymen@example.com in Email"* | `FILL` | `fill` on input field matching "Email" |
-| *"Scroll down"* / *"Scroll up"* | `SCROLL` | Smooth scroll 75% of viewport |
-| *"What can I do?"* / *"Where am I?"* | `SUMMARY` | Conversational spoken summary of site & actions |
-| *"Stop"* / *"Quiet"* | `CANCEL` | Instantly aborts speech output |
-
----
-
-## ♿ Accessibility Compliance
-- **WCAG 2.1 AAA Contrast**: Meets 7:1 contrast ratios for text and UI indicators.
-- **ARIA Live Regions**: Real-time status updates (`aria-live="polite"`) and priority alerts (`aria-live="assertive"`).
-- **Keyboard Navigation**: Full keyboard operability (`Space` to toggle mic, `Escape` to close modals, `Tab` order managed).
-- **Focus Rings**: High-contrast, non-intrusive focus rings on active elements during voice execution.
 
 ---
 

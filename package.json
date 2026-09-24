@@ -1,11 +1,12 @@
 {
   "name": "a11y-pilot",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "Voice-controlled web accessibility assistant that navigates and executes actions through natural conversation.",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "tsc --noEmit && vite build",
+    "zip": "npm run build && node --experimental-strip-types scripts/zip.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "generate:icons": "node --experimental-strip-types scripts/generate-icons.ts"
@@ -21,8 +22,10 @@
   "author": "Aymen Soussi",
   "license": "Apache-2.0",
   "devDependencies": {
+    "@types/archiver": "^8.0.0",
     "@types/chrome": "^0.0.308",
     "@types/node": "^22.13.9",
+    "archiver": "^8.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   }

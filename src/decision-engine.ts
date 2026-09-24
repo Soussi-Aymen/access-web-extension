@@ -10,7 +10,94 @@ import type {
   PageScanPayload,
 } from './types/index.js';
 
+export const SYNONYM_MAP: Record<string, string[]> = {
+  cart: ['basket', 'bag', 'trolley', 'shopping cart', 'shopping bag'],
+  basket: ['cart', 'bag', 'trolley'],
+  bag: ['cart', 'basket'],
+  'sign in': ['login', 'log in', 'signin'],
+  'log in': ['signin', 'sign in', 'login'],
+  login: ['sign in', 'log in', 'signin'],
+  'sign out': ['logout', 'log out', 'signout'],
+  'log out': ['signout', 'sign out', 'logout'],
+  logout: ['sign out', 'log out', 'signout'],
+  search: ['find', 'lookup', 'query', 'seek'],
+  find: ['search', 'lookup', 'query'],
+  menu: ['navigation', 'nav', 'hamburger', 'options'],
+  navigation: ['menu', 'nav'],
+  settings: ['preferences', 'config', 'configuration', 'options'],
+  help: ['support', 'faq', 'customer service', 'assistance'],
+  home: ['main', 'homepage'],
+  buy: ['purchase', 'order', 'checkout', 'pay'],
+  purchase: ['buy', 'order', 'checkout', 'pay'],
+  pay: ['buy', 'purchase', 'checkout'],
+};
+
+export const RISKY_PATTERN = /\b(buy|pay|purchase|order|delete|remove|confirm|place\s+order)\b/i;
+
 export class DecisionEngine {
+  /**
+   * Checks whether an actionable element represents a sensitive or risky action.
+   */
+  public static isRiskyAction(el: ActionableElement): boolean {
+    if (el.isSubmit) return true;
+    const textToCheck = `${el.name} ${el.nearbyText || ''} ${el.role}`.toLowerCase();
+    return RISKY_PATTERN.test(textToCheck);
+  }
+  /**
+   * Splits a chained utterance into separate sequential command strings.
+   * Splits on "and then", "after that", "then", and "and" (when both sides parse as valid actions).
+   */
+  public static splitUtteranceIntoCommands(
+    utterance: string,
+    elements: ActionableElement[] = [],
+    context: Partial<PageScanPayload> = {}
+  ): string[] {
+    if (!utterance || !utterance.trim()) return [];
+
+    // Split on explicit sequence delimiters first: "and then", "after that", "then"
+    const explicitParts = utterance.split(/\b(?:and\s+then|after\s+that|then)\b/i);
+    const commands: string[] = [];
+
+    for (const part of explicitParts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+
+      // Check if this part contains " and " separating two valid commands
+      const andParts = trimmed.split(/\band\b/i);
+      if (andParts.length > 1) {
+        // Try greedily splitting on 'and' only when segments resolve to actionable intents
+        let currentGroup = '';
+        for (let i = 0; i < andParts.length; i++) {
+          const candidate = andParts[i]!.trim();
+          if (!candidate) continue;
+
+          if (!currentGroup) {
+            currentGroup = candidate;
+          } else {
+            const testLeft = DecisionEngine.parseSingleIntent(currentGroup, elements, context);
+            const testRight = DecisionEngine.parseSingleIntent(candidate, elements, context);
+
+            const isLeftValid = testLeft.intent !== 'UNKNOWN' && testLeft.intent !== 'EMPTY';
+            const isRightValid = testRight.intent !== 'UNKNOWN' && testRight.intent !== 'EMPTY';
+
+            if (isLeftValid && isRightValid) {
+              commands.push(currentGroup.trim());
+              currentGroup = candidate;
+            } else {
+              currentGroup += ' and ' + candidate;
+            }
+          }
+        }
+        if (currentGroup.trim()) {
+          commands.push(currentGroup.trim());
+        }
+      } else {
+        commands.push(trimmed);
+      }
+    }
+
+    return commands.length > 0 ? commands : [utterance.trim()];
+  }
   /**
    * Generates a warm, natural human summary of current page actions.
    * Example: "You are on [Site Name]. Would you like to search for a product or view your cart?"
@@ -100,9 +187,58 @@ export class DecisionEngine {
   }
 
   /**
-   * Dispatches user speech transcripts into structured JSON decision payloads.
+   * Builds heuristic "Where am I?" summary from page title, landmarks, headings, element counts, and main snippet.
    */
-  public static parseIntent(
+  public static buildWhereAmISummary(pageContext: Partial<PageScanPayload>): string {
+    const { siteName = '', pageTitle = 'Current Page', elements = [], details } = pageContext;
+    const parts: string[] = [];
+
+    let titlePrefix: string;
+    if (siteName && pageTitle) {
+      titlePrefix = `${siteName}: ${pageTitle}`;
+    } else {
+      titlePrefix = siteName || pageTitle || 'this page';
+    }
+
+    parts.push(`You are on ${titlePrefix}.`);
+
+    if (details) {
+      if (details.landmarks && details.landmarks.length > 0) {
+        parts.push(`Landmarks include ${details.landmarks.join(', ')}.`);
+      }
+
+      if (details.headings && details.headings.length > 0) {
+        const topHeadings = details.headings.slice(0, 5).map((h) => `"${h}"`).join(', ');
+        parts.push(`Key headings: ${topHeadings}.`);
+      }
+
+      const { links = 0, buttons = 0, inputs = 0 } = details.counts || {};
+      const countParts: string[] = [];
+      if (links > 0) countParts.push(`${links} ${links === 1 ? 'link' : 'links'}`);
+      if (buttons > 0) countParts.push(`${buttons} ${buttons === 1 ? 'button' : 'buttons'}`);
+      if (inputs > 0) countParts.push(`${inputs} ${inputs === 1 ? 'input field' : 'input fields'}`);
+
+      if (countParts.length > 0) {
+        parts.push(`The page has ${countParts.join(', ')}.`);
+      }
+
+      if (details.mainContentSnippet) {
+        parts.push(details.mainContentSnippet);
+      }
+    } else if (elements.length > 0) {
+      const buttons = elements.filter((e) => e.role === 'button').length;
+      const links = elements.filter((e) => e.role === 'link').length;
+      const inputs = elements.filter((e) => ['textbox', 'searchbox', 'combobox'].includes(e.role)).length;
+      parts.push(`There are ${elements.length} actionable elements detected (${buttons} buttons, ${links} links, ${inputs} inputs).`);
+    }
+
+    return parts.join(' ');
+  }
+
+  /**
+   * Dispatches a single user speech transcript into a structured JSON decision payload.
+   */
+  public static parseSingleIntent(
     userUtterance: string,
     elements: ActionableElement[] = [],
     context: Partial<PageScanPayload> = {}
@@ -131,17 +267,104 @@ export class DecisionEngine {
       };
     }
 
-    // 2. HELP / SUMMARY / REPEAT INTENT
+    // 1b. VOICE MACROS INTENTS
+    // "remember this as <name>"
+    const rememberMatch = text.match(/^(?:remember\s+this\s+as|save\s+macro\s+as|record\s+macro\s+as)\s+(.+)$/i);
+    if (rememberMatch && rememberMatch[1]) {
+      const name = rememberMatch[1].trim();
+      return {
+        intent: 'MACRO',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: `Starting macro recording for "${name}".`,
+        spokenResponse: `Recording macro "${name}". Say your commands, then say "stop remembering" when done.`,
+        macroAction: 'record_start',
+        macroName: name,
+      };
+    }
+
+    // "stop remembering"
+    if (/^(stop remembering|finish macro|stop macro|save macro)$/i.test(text)) {
+      return {
+        intent: 'MACRO',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: 'Stopping macro recording.',
+        spokenResponse: 'Macro saved.',
+        macroAction: 'record_stop',
+      };
+    }
+
+    // "run <name>"
+    const runMatch = text.match(/^(?:run|play|execute)\s+(?:macro\s+)?(.+)$/i);
+    if (runMatch && runMatch[1]) {
+      const name = runMatch[1].trim();
+      return {
+        intent: 'MACRO',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: `Running macro "${name}".`,
+        spokenResponse: `Running macro "${name}".`,
+        macroAction: 'run',
+        macroName: name,
+      };
+    }
+
+    // "list macros"
+    if (/^(list macros|what macros|show macros|available macros)$/i.test(text)) {
+      return {
+        intent: 'MACRO',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: 'Listing saved voice macros.',
+        spokenResponse: '',
+        macroAction: 'list',
+      };
+    }
+
+    // "delete macro <name>"
+    const deleteMatch = text.match(/^(?:delete|remove)\s+macro\s+(.+)$/i);
+    if (deleteMatch && deleteMatch[1]) {
+      const name = deleteMatch[1].trim();
+      return {
+        intent: 'MACRO',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: `Deleting macro "${name}".`,
+        spokenResponse: `Deleted macro "${name}".`,
+        macroAction: 'delete',
+        macroName: name,
+      };
+    }
+
+    // 2. WHERE AM I INTENT
+    if (text.includes('where am i') || /^(where am i|tell me where i am)$/i.test(text)) {
+      const summary = DecisionEngine.buildWhereAmISummary({
+        siteName: context.siteName,
+        pageTitle: context.pageTitle,
+        elements,
+        details: context.details,
+      });
+      return {
+        intent: 'SUMMARY',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: 'User requested heuristic Where am I summary.',
+        spokenResponse: summary,
+      };
+    }
+
+    // 2b. HELP / SUMMARY / REPEAT INTENT
     if (
-      /^(help|what can i do|where am i|summarize|options|what is on this page|repeat|menu)$/i.test(text) ||
+      /^(help|what can i do|summarize|options|what is on this page|repeat|menu)$/i.test(text) ||
       text.includes('what can i do') ||
-      text.includes('where am i') ||
       text.includes('summarize the page')
     ) {
       const summary = DecisionEngine.generatePageSummary({
         siteName: context.siteName,
         pageTitle: context.pageTitle,
         elements,
+        details: context.details,
       });
       return {
         intent: 'SUMMARY',
@@ -149,6 +372,77 @@ export class DecisionEngine {
         confidence: 0.95,
         explanation: 'User requested page summary or help.',
         spokenResponse: summary,
+      };
+    }
+
+    // 2c. SCREEN-READER STYLE NAVIGATION INTENTS
+    // "next heading"
+    if (/^(next heading|go to next heading)$/i.test(text)) {
+      return {
+        intent: 'CLICK',
+        action: { type: 'navigate_heading', navDirection: 'next' },
+        confidence: 0.95,
+        explanation: 'Navigating to next heading.',
+        spokenResponse: 'Next heading.',
+      };
+    }
+
+    // "previous heading"
+    if (/^(previous heading|prior heading|last heading|back to previous heading)$/i.test(text)) {
+      return {
+        intent: 'CLICK',
+        action: { type: 'navigate_heading', navDirection: 'previous' },
+        confidence: 0.95,
+        explanation: 'Navigating to previous heading.',
+        spokenResponse: 'Previous heading.',
+      };
+    }
+
+    // "next link"
+    if (/^(next link|go to next link)$/i.test(text)) {
+      return {
+        intent: 'CLICK',
+        action: { type: 'navigate_link', navDirection: 'next' },
+        confidence: 0.95,
+        explanation: 'Navigating to next link.',
+        spokenResponse: 'Next link.',
+      };
+    }
+
+    // "list landmarks"
+    if (/^(list landmarks|what landmarks|landmarks)$/i.test(text)) {
+      const lms = context.details?.landmarks || [];
+      const landmarkText = lms.length > 0
+        ? `Landmarks on this page: ${lms.join(', ')}.`
+        : 'No specific landmarks detected on this page.';
+      return {
+        intent: 'SUMMARY',
+        action: { type: 'none' },
+        confidence: 0.95,
+        explanation: 'User requested list of landmarks.',
+        spokenResponse: landmarkText,
+      };
+    }
+
+    // "go to main"
+    if (/^(go to main|jump to main|main content)$/i.test(text)) {
+      return {
+        intent: 'CLICK',
+        action: { type: 'navigate_landmark', landmarkType: 'main' },
+        confidence: 0.95,
+        explanation: 'Navigating to main landmark.',
+        spokenResponse: 'Going to main content.',
+      };
+    }
+
+    // "go to navigation"
+    if (/^(go to navigation|jump to navigation|navigation landmark|go to menu)$/i.test(text)) {
+      return {
+        intent: 'CLICK',
+        action: { type: 'navigate_landmark', landmarkType: 'navigation' },
+        confidence: 0.95,
+        explanation: 'Navigating to navigation landmark.',
+        spokenResponse: 'Going to navigation.',
       };
     }
 
@@ -272,6 +566,21 @@ export class DecisionEngine {
       const requestedId = parseInt(numberMatch[1], 10);
       const targetById = elements.find((el) => el.id === requestedId);
       if (targetById) {
+        if (DecisionEngine.isRiskyAction(targetById)) {
+          return {
+            intent: 'CONFIRM',
+            action: {
+              type: 'click',
+              id: targetById.id,
+              targetName: targetById.name,
+            },
+            confidence: 0.99,
+            explanation: `Risky action detected for element ${targetById.id} (${targetById.name}).`,
+            spokenResponse: `Are you sure you want to ${targetById.name}? Say yes to confirm or no to cancel.`,
+            requiresConfirmation: true,
+          };
+        }
+
         return {
           intent: 'CLICK_BY_ID',
           action: {
@@ -295,10 +604,46 @@ export class DecisionEngine {
       ['button', 'link', 'checkbox', 'combobox'].includes(el.role)
     );
 
-    const matchResult = DecisionEngine.findBestMatchWithScore(targetPhrase, interactiveElements);
+    const rankedMatches = DecisionEngine.rankMatches(targetPhrase, interactiveElements);
 
-    if (matchResult && matchResult.score >= 0.40) {
-      const target = matchResult.element;
+    if (rankedMatches.length > 0 && rankedMatches[0]!.score >= 0.40) {
+      const bestMatch = rankedMatches[0]!;
+
+      // Disambiguation: if second candidate is close (within 0.08 and above 0.38)
+      if (rankedMatches.length > 1) {
+        const secondMatch = rankedMatches[1]!;
+        if (bestMatch.score - secondMatch.score <= 0.08 && secondMatch.score >= 0.38) {
+          const el1 = bestMatch.element;
+          const el2 = secondMatch.element;
+          const askMsg = `Did you mean #${el1.id} ${el1.name} or #${el2.id} ${el2.name}? Say the number.`;
+          return {
+            intent: 'DISAMBIGUATE',
+            action: { type: 'none' },
+            confidence: bestMatch.score,
+            explanation: `Close match between element ${el1.id} and ${el2.id}.`,
+            spokenResponse: askMsg,
+            ambiguousCandidates: [el1, el2],
+          };
+        }
+      }
+
+      const target = bestMatch.element;
+
+      if (DecisionEngine.isRiskyAction(target)) {
+        return {
+          intent: 'CONFIRM',
+          action: {
+            type: 'click',
+            id: target.id,
+            targetName: target.name,
+          },
+          confidence: bestMatch.score,
+          explanation: `Risky action detected for element "${target.name}".`,
+          spokenResponse: `Are you sure you want to ${target.name}? Say yes to confirm or no to cancel.`,
+          requiresConfirmation: true,
+        };
+      }
+
       return {
         intent: 'CLICK',
         action: {
@@ -306,8 +651,8 @@ export class DecisionEngine {
           id: target.id,
           targetName: target.name,
         },
-        confidence: matchResult.score,
-        explanation: `Matched phrase "${targetPhrase}" to ${target.role} "${target.name}" with score ${matchResult.score.toFixed(2)}.`,
+        confidence: bestMatch.score,
+        explanation: `Matched phrase "${targetPhrase}" to ${target.role} "${target.name}" with score ${bestMatch.score.toFixed(2)}.`,
         spokenResponse: `Clicking ${target.name}.`,
       };
     }
@@ -322,6 +667,38 @@ export class DecisionEngine {
     };
   }
 
+  /**
+   * Dispatches user speech transcript into a structured JSON decision payload.
+   */
+  public static parseIntent(
+    userUtterance: string,
+    elements: ActionableElement[] = [],
+    context: Partial<PageScanPayload> = {}
+  ): DecisionPayload {
+    return DecisionEngine.parseSingleIntent(userUtterance, elements, context);
+  }
+
+  /**
+   * Expands a set of tokens with their synonyms from SYNONYM_MAP.
+   */
+  public static expandSynonyms(tokens: Iterable<string>): Set<string> {
+    const expanded = new Set<string>();
+    for (const token of tokens) {
+      expanded.add(token);
+      if (SYNONYM_MAP[token]) {
+        for (const syn of SYNONYM_MAP[token]!) {
+          for (const st of syn.split(/\s+/)) {
+            if (st) expanded.add(st);
+          }
+        }
+      }
+    }
+    return expanded;
+  }
+
+  /**
+   * Scores match between user query and candidate string or element name using token overlap & synonyms.
+   */
   public static scoreMatch(query: string, candidate: string): number {
     if (!query || !candidate) return 0;
 
@@ -329,6 +706,14 @@ export class DecisionEngine {
     const c = candidate.toLowerCase().trim();
 
     if (q === c) return 1.0;
+
+    // Check direct phrase synonym match
+    if (SYNONYM_MAP[q] && SYNONYM_MAP[q]!.some((syn) => syn === c || c.includes(syn))) {
+      return 0.95;
+    }
+    if (SYNONYM_MAP[c] && SYNONYM_MAP[c]!.some((syn) => syn === q || q.includes(syn))) {
+      return 0.95;
+    }
 
     if (c.includes(q)) {
       return 0.85 + (q.length / c.length) * 0.1;
@@ -342,9 +727,12 @@ export class DecisionEngine {
 
     if (qTokens.size === 0 || cTokens.size === 0) return 0;
 
+    const expandedQTokens = DecisionEngine.expandSynonyms(qTokens);
+    const expandedCTokens = DecisionEngine.expandSynonyms(cTokens);
+
     let intersection = 0;
     for (const token of qTokens) {
-      if (cTokens.has(token)) {
+      if (expandedCTokens.has(token)) {
         intersection++;
       } else {
         for (const cToken of cTokens) {
@@ -356,31 +744,56 @@ export class DecisionEngine {
       }
     }
 
-    const union = new Set([...qTokens, ...cTokens]).size;
-    return intersection / union;
+    const union = new Set([...expandedQTokens, ...expandedCTokens]).size;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  /**
+   * Scores candidate element by accessible name, role, and nearby text.
+   */
+  public static scoreElementMatch(query: string, el: ActionableElement): number {
+    const nameScore = DecisionEngine.scoreMatch(query, el.name);
+    let totalScore = nameScore * 0.8;
+
+    // Bonus for matching role mention (e.g. query mentions "button" and el.role === 'button')
+    const qLower = query.toLowerCase();
+    if (qLower.includes(el.role)) {
+      totalScore += 0.1;
+    }
+
+    // Nearby text token overlap bonus
+    if (el.nearbyText) {
+      const nearbyScore = DecisionEngine.scoreMatch(query, el.nearbyText);
+      if (nearbyScore > 0) {
+        totalScore += Math.min(nearbyScore * 0.1, 0.1);
+      }
+    }
+
+    return Math.min(totalScore, 1.0);
+  }
+
+  public static rankMatches(
+    query: string,
+    elements: ActionableElement[]
+  ): Array<{ element: ActionableElement; score: number }> {
+    if (!query || elements.length === 0) return [];
+
+    const scored = elements.map((el) => ({
+      element: el,
+      score: DecisionEngine.scoreElementMatch(query, el),
+    }));
+
+    return scored
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
   }
 
   public static findBestMatchWithScore(
     query: string,
     elements: ActionableElement[]
   ): { element: ActionableElement; score: number } | null {
-    if (!query || elements.length === 0) return null;
-
-    let best: ActionableElement | null = null;
-    let highestScore = 0;
-
-    for (const el of elements) {
-      const score = DecisionEngine.scoreMatch(query, el.name);
-      if (score > highestScore) {
-        highestScore = score;
-        best = el;
-      }
-    }
-
-    if (best && highestScore > 0) {
-      return { element: best, score: highestScore };
-    }
-    return null;
+    const ranked = DecisionEngine.rankMatches(query, elements);
+    return ranked.length > 0 ? ranked[0]! : null;
   }
 
   public static findBestMatch(

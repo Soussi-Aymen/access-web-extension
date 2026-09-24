@@ -38,8 +38,8 @@ export class VoiceEngine {
 
   public googleTTS: GoogleTTS = new GoogleTTS();
   public edgeTTS: EdgeTTS = new EdgeTTS();
-  public selectedVoiceId: string = 'google-en-US';
-  public useNeuralVoice: boolean = true;
+  public selectedVoiceId: string = 'system';
+  public useNeuralVoice: boolean = false;
 
   private selectedVoice: SpeechSynthesisVoice | null = null;
   private availableVoices: SpeechSynthesisVoice[] = [];
@@ -303,8 +303,10 @@ export class VoiceEngine {
           });
           return;
         } catch (edgeErr) {
-          console.warn('[VoiceEngine] Edge TTS not supported in current browser session, switching to Google Natural TTS:', edgeErr);
+          console.warn('[VoiceEngine] Edge TTS failed, falling back to local speech synthesis:', edgeErr);
           this.edgeTTS.stop();
+          this.isSpeaking = false;
+          return this.speakLocal(text, options);
         }
       }
 

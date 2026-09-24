@@ -161,12 +161,30 @@ flowchart TD
 | Voice Command | Action |
 | :--- | :--- |
 | *"Search for vintage jackets"* | Fills searchbox and triggers search |
-| *"Click cart"* / *"Open settings"* | Clicks the matching interactive control |
+| *"Click cart"* / *"Open settings"* / *"Click bag"* | Clicks matching control using semantics and synonyms |
 | *"Click 2"* / *"Select number 3"* | Targets item directly by its transient ID badge |
 | *"Type aymen@example.com in Email"* | Fills the specific form field |
-| *"Scroll down"* / *"Scroll up"* | Smoothly scrolls the viewport |
-| *"Where am I?"* / *"What can I do?"* | Speaks a conversational summary of the page |
+| *"Scroll down"* / *"Scroll up"* / *"Top"* / *"Bottom"* | Smoothly scrolls the viewport |
+| *"Where am I?"* | Heuristic summary of page title, landmarks, headings, counts, and snippet |
+| *"What can I do?"* / *"Help"* | Speaks a conversational summary of primary actions |
+| *"Click cart and then scroll down"* | Chains multiple commands sequentially with page settle |
+| *"Next heading"* / *"Previous heading"* | Cycles focus and scrolls to heading elements |
+| *"Next link"* | Cycles focus and scrolls to link elements |
+| *"List landmarks"* | Speaks all ARIA landmarks detected on the page |
+| *"Go to main"* / *"Go to navigation"* | Moves focus and jumps directly to specified landmark |
+| *"Remember this as [name]"* | Starts recording voice commands into a macro |
+| *"Stop remembering"* | Saves current recorded commands as a named macro |
+| *"Run [name]"* | Replays saved macro commands through standard matching |
+| *"List macros"* | Speaks all saved macro names |
+| *"Delete macro [name]"* | Removes a saved macro from storage |
 | *"Stop"* / *"Quiet"* | Immediately cancels speech |
+
+---
+
+## ⚠️ Known Limitations
+
+- **Speech Recognition Processing**: Browser speech recognition (`webkitSpeechRecognition`) is provided natively by Google Chrome and may send audio to Google servers for transcription depending on the operating system and browser configuration.
+- **No AI Model or Cloud LLM**: All intent parsing, synonym expansion, page summarization, candidate ranking, and macro execution are built purely with deterministic, lightweight TypeScript heuristics without any AI model or LLM API calls.
 
 ---
 

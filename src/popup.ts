@@ -11,6 +11,7 @@ import { DecisionEngine } from './decision-engine.js';
 import type {
   ActionableElement,
   ActionResult,
+  AgentAction,
   PageScanPayload,
 } from './types/index.js';
 
@@ -50,6 +51,14 @@ export class PopupController {
     pageTitle: '',
     url: '',
   };
+
+  // Safety confirmation state
+  private pendingConfirmAction: AgentAction | null = null;
+  private confirmTimeoutId: any = null;
+
+  // Voice macro recording state
+  private recordingMacroName: string | null = null;
+  private recordedCommands: string[] = [];
 
   private dom = {
     statusPill: document.getElementById('statusPill') as HTMLElement,
@@ -253,7 +262,7 @@ export class PopupController {
     this.updateStatus('ready', 'Ready');
   }
 
-  public async connectAndScanActiveTab(_isManualRescan: boolean = false): Promise<void> {
+  public async connectAndScanActiveTab(_isManualRescan: boolean = false, speakSummary: boolean = true): Promise<void> {
     this.updateStatus('processing', 'Scanning page...');
 
     try {
@@ -293,10 +302,11 @@ export class PopupController {
         this.renderActionsList(response.elements);
         this.updateStatus('ready', 'Ready');
 
-        const summary = DecisionEngine.generatePageSummary(this.pageContext);
-        this.appendMessage('agent', summary);
-
-        await this.voiceEngine.speak(summary);
+        if (speakSummary) {
+          const summary = DecisionEngine.generatePageSummary(this.pageContext);
+          this.appendMessage('agent', summary);
+          await this.voiceEngine.speak(summary);
+        }
 
         if (!this.isListening) {
           this.startListening();
@@ -315,55 +325,278 @@ export class PopupController {
     }
   }
 
+  private async waitForPageToSettle(): Promise<void> {
+    if (!this.activeTabId) return;
+    try {
+      await chrome.tabs.sendMessage(this.activeTabId, {
+        type: 'A11Y_WAIT_FOR_SETTLE',
+        timeoutMs: 3000,
+        quietMs: 500,
+      });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  private clearConfirmation(): void {
+    if (this.confirmTimeoutId) {
+      clearTimeout(this.confirmTimeoutId);
+      this.confirmTimeoutId = null;
+    }
+    this.pendingConfirmAction = null;
+  }
+
+  private async getSavedMacros(): Promise<Record<string, string[]>> {
+    try {
+      const result = await chrome.storage.local.get('a11y_macros');
+      return (result && result.a11y_macros) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async saveMacros(macros: Record<string, string[]>): Promise<void> {
+    try {
+      await chrome.storage.local.set({ a11y_macros: macros });
+    } catch (err) {
+      console.warn('[Popup] Failed to save macros to chrome.storage.local:', err);
+    }
+  }
+
   public async handleUserVoiceCommand(userUtterance: string): Promise<void> {
     this.appendMessage('user', userUtterance);
     this.updateStatus('processing', 'Processing...');
 
-    const decision = DecisionEngine.parseIntent(
+    const trimmedLower = userUtterance.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+
+    // 1. Safety confirmation check if waiting for yes/no
+    if (this.pendingConfirmAction) {
+      if (/^(yes|confirm|proceed|ok|sure|do it)$/i.test(trimmedLower)) {
+        const actionToExecute = this.pendingConfirmAction;
+        this.clearConfirmation();
+
+        if (this.activeTabId) {
+          try {
+            await chrome.tabs.sendMessage(this.activeTabId, {
+              type: 'A11Y_EXECUTE_ACTION',
+              action: actionToExecute,
+            });
+          } catch (err) {
+            console.error('[Popup] Confirmation action execution error:', err);
+          }
+        }
+
+        const msg = `Confirmed. ${actionToExecute.targetName ? `Action performed on ${actionToExecute.targetName}.` : 'Action performed.'}`;
+        this.appendMessage('agent', msg);
+        await this.voiceEngine.speak(msg);
+
+        await this.waitForPageToSettle();
+        await this.connectAndScanActiveTab(false, false);
+
+        if (this.isListening) {
+          this.updateStatus('listening', 'Listening...');
+        } else {
+          this.updateStatus('ready', 'Ready');
+        }
+        return;
+      } else if (/^(no|cancel|stop|don't|dont|never mind)$/i.test(trimmedLower)) {
+        this.clearConfirmation();
+        const msg = 'Action cancelled.';
+        this.appendMessage('agent', msg);
+        await this.voiceEngine.speak(msg);
+        if (this.isListening) {
+          this.updateStatus('listening', 'Listening...');
+        } else {
+          this.updateStatus('ready', 'Ready');
+        }
+        return;
+      }
+    }
+
+    const subCommands = DecisionEngine.splitUtteranceIntoCommands(
       userUtterance,
       this.currentElements,
       this.pageContext
     );
 
-    console.log('[Popup:DecisionEngine] Structured Decision:', decision);
+    for (let i = 0; i < subCommands.length; i++) {
+      const stepText = subCommands[i]!;
+      const stepNum = i + 1;
 
-    if (decision.intent === 'CANCEL') {
-      this.voiceEngine.cancel();
-      this.updateStatus('listening', 'Listening...');
-      return;
-    }
+      const decision = DecisionEngine.parseSingleIntent(
+        stepText,
+        this.currentElements,
+        this.pageContext
+      );
 
-    if (decision.action && decision.action.type !== 'none' && this.activeTabId) {
-      try {
-        const result: ActionResult = await chrome.tabs.sendMessage(this.activeTabId, {
-          type: 'A11Y_EXECUTE_ACTION',
-          action: decision.action,
-        });
+      console.log(`[Popup:DecisionEngine] Step ${stepNum}/${subCommands.length}:`, stepText, decision);
 
-        if (result && !result.success) {
-          console.warn('[Popup] Content action execution notice:', result.message);
-        }
-      } catch (err) {
-        console.error('[Popup] Failed to send action to content script:', err);
-      }
-    }
-
-    const speechResponse = decision.spokenResponse;
-    if (speechResponse) {
-      this.appendMessage('agent', speechResponse);
-      await this.voiceEngine.speak(speechResponse);
-    }
-
-    if (decision.action && ['fill_and_submit', 'click'].includes(decision.action.type)) {
-      setTimeout(() => {
-        this.connectAndScanActiveTab();
-      }, 1500);
-    } else {
-      if (this.isListening) {
+      if (decision.intent === 'CANCEL') {
+        this.clearConfirmation();
+        this.voiceEngine.cancel();
         this.updateStatus('listening', 'Listening...');
-      } else {
-        this.updateStatus('ready', 'Ready');
+        return;
       }
+
+      // Handle MACRO intents
+      if (decision.intent === 'MACRO') {
+        const macroAct = decision.macroAction;
+        if (macroAct === 'record_start' && decision.macroName) {
+          this.recordingMacroName = decision.macroName.toLowerCase();
+          this.recordedCommands = [];
+          this.appendMessage('agent', decision.spokenResponse);
+          await this.voiceEngine.speak(decision.spokenResponse);
+          break;
+        }
+
+        if (macroAct === 'record_stop') {
+          if (this.recordingMacroName) {
+            const macros = await this.getSavedMacros();
+            macros[this.recordingMacroName] = [...this.recordedCommands];
+            await this.saveMacros(macros);
+            const savedMsg = `Macro "${this.recordingMacroName}" saved with ${this.recordedCommands.length} ${this.recordedCommands.length === 1 ? 'command' : 'commands'}.`;
+            this.recordingMacroName = null;
+            this.recordedCommands = [];
+            this.appendMessage('agent', savedMsg);
+            await this.voiceEngine.speak(savedMsg);
+          } else {
+            const noRecMsg = 'No macro was being recorded.';
+            this.appendMessage('agent', noRecMsg);
+            await this.voiceEngine.speak(noRecMsg);
+          }
+          break;
+        }
+
+        if (macroAct === 'run' && decision.macroName) {
+          const runName = decision.macroName.toLowerCase();
+          const macros = await this.getSavedMacros();
+          const macroCommands = macros[runName];
+
+          if (!macroCommands || macroCommands.length === 0) {
+            const notFoundMsg = `Macro "${decision.macroName}" not found. Say "list macros" to hear saved macros.`;
+            this.appendMessage('agent', notFoundMsg);
+            await this.voiceEngine.speak(notFoundMsg);
+          } else {
+            this.appendMessage('agent', `Running macro "${decision.macroName}" with ${macroCommands.length} steps.`);
+            await this.voiceEngine.speak(`Running macro "${decision.macroName}".`);
+            // Execute macro commands sequentially
+            for (const macroStep of macroCommands) {
+              await this.handleUserVoiceCommand(macroStep);
+            }
+          }
+          break;
+        }
+
+        if (macroAct === 'list') {
+          const macros = await this.getSavedMacros();
+          const names = Object.keys(macros);
+          const listMsg = names.length > 0
+            ? `Saved macros: ${names.join(', ')}.`
+            : 'No saved macros. Say "remember this as" followed by a name to create one.';
+          this.appendMessage('agent', listMsg);
+          await this.voiceEngine.speak(listMsg);
+          break;
+        }
+
+        if (macroAct === 'delete' && decision.macroName) {
+          const delName = decision.macroName.toLowerCase();
+          const macros = await this.getSavedMacros();
+          if (macros[delName]) {
+            delete macros[delName];
+            await this.saveMacros(macros);
+            this.appendMessage('agent', decision.spokenResponse);
+            await this.voiceEngine.speak(decision.spokenResponse);
+          } else {
+            const noMacroMsg = `Macro "${decision.macroName}" was not found.`;
+            this.appendMessage('agent', noMacroMsg);
+            await this.voiceEngine.speak(noMacroMsg);
+          }
+          break;
+        }
+      }
+
+      // Handle CONFIRM intent for risky actions
+      if (decision.intent === 'CONFIRM') {
+        this.clearConfirmation();
+        this.pendingConfirmAction = decision.action;
+
+        // Auto-cancel on 10s of silence
+        this.confirmTimeoutId = setTimeout(() => {
+          if (this.pendingConfirmAction) {
+            this.clearConfirmation();
+            const timeoutMsg = 'Confirmation timed out. Action cancelled.';
+            this.appendMessage('agent', timeoutMsg);
+            this.voiceEngine.speak(timeoutMsg);
+          }
+        }, 10000);
+
+        this.appendMessage('agent', decision.spokenResponse);
+        await this.voiceEngine.speak(decision.spokenResponse);
+        break;
+      }
+
+      if (decision.intent === 'UNKNOWN') {
+        const failMessage = subCommands.length > 1
+          ? `Step ${stepNum} failed: could not understand "${stepText}".`
+          : decision.spokenResponse;
+        this.appendMessage('agent', failMessage);
+        await this.voiceEngine.speak(failMessage);
+        break;
+      }
+
+      let actionSucceeded = true;
+      if (decision.action && decision.action.type !== 'none' && this.activeTabId) {
+        try {
+          const result: ActionResult = await chrome.tabs.sendMessage(this.activeTabId, {
+            type: 'A11Y_EXECUTE_ACTION',
+            action: decision.action,
+          });
+
+          if (result && !result.success) {
+            console.warn('[Popup] Content action execution notice:', result.message);
+            actionSucceeded = false;
+          }
+        } catch (err) {
+          console.error('[Popup] Failed to send action to content script:', err);
+          actionSucceeded = false;
+        }
+      }
+
+      if (!actionSucceeded) {
+        const failMsg = `Step ${stepNum} failed: could not execute "${stepText}".`;
+        this.appendMessage('agent', failMsg);
+        await this.voiceEngine.speak(failMsg);
+        break;
+      }
+
+      // Record successfully executed command if recording macro
+      if (this.recordingMacroName) {
+        this.recordedCommands.push(stepText);
+      }
+
+      // Speak response for the step (or default spokenResponse)
+      if (decision.spokenResponse) {
+        this.appendMessage('agent', decision.spokenResponse);
+        await this.voiceEngine.speak(decision.spokenResponse);
+      }
+
+      // If more steps remain, wait for page to settle and re-scan without speaking full summary
+      if (i < subCommands.length - 1) {
+        await this.waitForPageToSettle();
+        await this.connectAndScanActiveTab(false, false);
+      } else {
+        // Last step: if it was a click or submit, trigger settle and scan
+        if (decision.action && ['fill_and_submit', 'click'].includes(decision.action.type)) {
+          await this.waitForPageToSettle();
+          await this.connectAndScanActiveTab(false, false);
+        }
+      }
+    }
+
+    if (this.isListening) {
+      this.updateStatus('listening', 'Listening...');
+    } else {
+      this.updateStatus('ready', 'Ready');
     }
   }
 

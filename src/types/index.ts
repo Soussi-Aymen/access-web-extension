@@ -15,6 +15,19 @@ export interface ActionableElement {
   id: number;
   role: ActionableRole;
   name: string;
+  nearbyText?: string;
+  isSubmit?: boolean;
+}
+
+export interface PageSummaryDetails {
+  landmarks: string[];
+  headings: string[];
+  counts: {
+    links: number;
+    buttons: number;
+    inputs: number;
+  };
+  mainContentSnippet?: string;
 }
 
 export interface PageScanPayload {
@@ -23,6 +36,7 @@ export interface PageScanPayload {
   url: string;
   elements: ActionableElement[];
   totalCount: number;
+  details?: PageSummaryDetails;
 }
 
 export type ActionType =
@@ -31,6 +45,9 @@ export type ActionType =
   | 'fill_and_submit'
   | 'scroll'
   | 'focus'
+  | 'navigate_heading'
+  | 'navigate_link'
+  | 'navigate_landmark'
   | 'none';
 
 export type ScrollDirection = 'down' | 'up' | 'top' | 'bottom';
@@ -41,6 +58,8 @@ export interface AgentAction {
   value?: string | null;
   direction?: ScrollDirection | null;
   targetName?: string | null;
+  navDirection?: 'next' | 'previous';
+  landmarkType?: 'main' | 'navigation' | 'search' | 'form';
 }
 
 export type IntentType =
@@ -48,6 +67,9 @@ export type IntentType =
   | 'SEARCH_NO_BOX'
   | 'CLICK'
   | 'CLICK_BY_ID'
+  | 'DISAMBIGUATE'
+  | 'CONFIRM'
+  | 'MACRO'
   | 'FILL'
   | 'SCROLL'
   | 'SUMMARY'
@@ -61,6 +83,10 @@ export interface DecisionPayload {
   confidence: number;
   explanation: string;
   spokenResponse: string;
+  ambiguousCandidates?: ActionableElement[];
+  requiresConfirmation?: boolean;
+  macroAction?: 'record_start' | 'record_stop' | 'run' | 'list' | 'delete';
+  macroName?: string;
 }
 
 export interface ActionResult {
@@ -90,9 +116,9 @@ export interface VoiceQueueItem {
   onComplete?: (() => void) | null;
 }
 
-// Chrome Message contracts
 export type ExtensionMessage =
   | { type: 'A11Y_PING' }
   | { type: 'A11Y_SCAN_PAGE' }
   | { type: 'A11Y_EXECUTE_ACTION'; action: AgentAction }
-  | { type: 'A11Y_HIGHLIGHT'; id: number };
+  | { type: 'A11Y_HIGHLIGHT'; id: number }
+  | { type: 'A11Y_WAIT_FOR_SETTLE'; timeoutMs?: number; quietMs?: number };

@@ -59,11 +59,14 @@ describe('VoiceEngine', () => {
     assert.match(token, /^[0-9A-F]{64}$/);
   });
 
-  it('allows selecting neural voices and toggling engine mode', async () => {
+  it('defaults to native speechSynthesis voice and allows toggling to neural', async () => {
     const engine = new VoiceEngine();
-    assert.equal(engine.useNeuralVoice, true);
-    assert.equal(engine.edgeTTS.selectedVoiceId, 'en-US-AriaNeural');
+    assert.equal(engine.useNeuralVoice, false);
+    assert.equal(engine.selectedVoiceId, 'system');
+    assert.equal(engine.getActiveVoiceLabel(), 'System Default');
 
+    // Toggle to neural voice
+    engine.useNeuralVoice = true;
     const changed = engine.setNeuralVoice('en-US-GuyNeural');
     assert.equal(changed, true);
     assert.equal(engine.edgeTTS.selectedVoiceId, 'en-US-GuyNeural');
@@ -83,8 +86,10 @@ describe('VoiceEngine', () => {
     }
   });
 
-  it('defaults to Google Natural US voice and supports switching to British voice', () => {
+  it('supports selecting Google Natural neural voice when enabled', () => {
     const engine = new VoiceEngine();
+    engine.useNeuralVoice = true;
+    engine.setNeuralVoice('google-en-US');
     assert.equal(engine.selectedVoiceId, 'google-en-US');
     assert.equal(engine.getActiveVoiceLabel(), 'Google Natural (US Neural)');
 

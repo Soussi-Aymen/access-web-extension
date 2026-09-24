@@ -76,6 +76,7 @@ export class PopupController {
     testVoiceBtn: document.getElementById('testVoiceBtn') as HTMLButtonElement,
     helpModal: document.getElementById('helpModal') as HTMLElement,
     closeModalBtn: document.getElementById('closeModalBtn') as HTMLButtonElement,
+    versionBadge: document.getElementById('versionBadge') as HTMLElement,
   };
 
   constructor() {
@@ -96,6 +97,16 @@ export class PopupController {
   }
 
   private async init(): Promise<void> {
+    if (this.dom.versionBadge) {
+      try {
+        const manifest = chrome.runtime.getManifest();
+        if (manifest && manifest.version) {
+          this.dom.versionBadge.textContent = `v${manifest.version}`;
+        }
+      } catch {
+        // Fallback to static text
+      }
+    }
     this.setupEventListeners();
     await this.initVoiceSelector();
     this.setupSpeechRecognition();

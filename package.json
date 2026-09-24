@@ -1,11 +1,12 @@
 {
   "name": "a11y-pilot",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Voice-controlled web accessibility assistant that navigates and executes actions through natural conversation.",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "tsc --noEmit && vite build",
+    "sync:version": "node --experimental-strip-types scripts/sync-version.ts",
+    "build": "node --experimental-strip-types scripts/sync-version.ts && tsc --noEmit && vite build && node --experimental-strip-types scripts/sync-version.ts",
     "zip": "npm run build && node --experimental-strip-types scripts/zip.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",

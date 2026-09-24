@@ -71,5 +71,28 @@ describe('VoiceEngine', () => {
     const label = engine.getActiveVoiceLabel();
     assert.equal(label, 'Guy (Natural Neural)');
   });
+
+  it('correctly chunks long text under 175 characters for GoogleTTS', async () => {
+    const { GoogleTTS } = await import('../src/google-tts.ts');
+    const longText = 'Welcome to a11y-pilot, an advanced conversational accessibility pilot for the web. It inspects page hierarchies and helps users navigate efficiently by voice, clicking buttons, typing search terms, and scrolling pages without robotic synthetic audio.';
+    const chunks = GoogleTTS.chunkText(longText, 175);
+
+    assert.ok(chunks.length >= 2);
+    for (const chunk of chunks) {
+      assert.ok(chunk.length <= 175, `Chunk exceeded 175 chars: ${chunk}`);
+    }
+  });
+
+  it('defaults to Google Natural US voice and supports switching to British voice', () => {
+    const engine = new VoiceEngine();
+    assert.equal(engine.selectedVoiceId, 'google-en-US');
+    assert.equal(engine.getActiveVoiceLabel(), 'Google Natural (US Neural)');
+
+    const changed = engine.setNeuralVoice('google-en-GB');
+    assert.equal(changed, true);
+    assert.equal(engine.selectedVoiceId, 'google-en-GB');
+    assert.equal(engine.googleTTS.selectedLocale, 'en-GB');
+    assert.equal(engine.getActiveVoiceLabel(), 'Google Natural (British Neural)');
+  });
 });
 

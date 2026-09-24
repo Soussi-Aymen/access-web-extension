@@ -13,6 +13,22 @@
 
 import type { SpeakOptions, VoiceEngineOptions, VoiceQueueItem } from './types/index.js';
 import { EdgeTTS, NEURAL_VOICES, type EdgeVoice } from './edge-tts.ts';
+import { GoogleTTS, GOOGLE_NEURAL_VOICES, type GoogleVoice } from './google-tts.ts';
+
+export type { EdgeVoice, GoogleVoice };
+
+export interface NeuralVoiceOption {
+  id: string;
+  name: string;
+  gender: 'Female' | 'Male';
+  locale: string;
+  engine: 'google' | 'edge';
+}
+
+export const ALL_NEURAL_VOICES: NeuralVoiceOption[] = [
+  ...GOOGLE_NEURAL_VOICES.map((v) => ({ ...v, engine: 'google' as const })),
+  ...NEURAL_VOICES.map((v) => ({ ...v, engine: 'edge' as const })),
+];
 
 export class VoiceEngine {
   private synth: SpeechSynthesis | null = null;
@@ -20,7 +36,9 @@ export class VoiceEngine {
   public pitch: number;
   public volume: number;
 
+  public googleTTS: GoogleTTS = new GoogleTTS();
   public edgeTTS: EdgeTTS = new EdgeTTS();
+  public selectedVoiceId: string = 'google-en-US';
   public useNeuralVoice: boolean = true;
 
   private selectedVoice: SpeechSynthesisVoice | null = null;
@@ -109,19 +127,28 @@ export class VoiceEngine {
   /**
    * Returns list of neural voices available.
    */
-  public getNeuralVoices(): EdgeVoice[] {
-    return NEURAL_VOICES;
+  public getNeuralVoices(): NeuralVoiceOption[] {
+    return ALL_NEURAL_VOICES;
   }
 
   /**
    * Sets the active neural voice.
    */
   public setNeuralVoice(voiceId: string): boolean {
-    const exists = NEURAL_VOICES.some((v) => v.id === voiceId);
-    if (exists) {
+    const googleVoice = GOOGLE_NEURAL_VOICES.find((v) => v.id === voiceId);
+    if (googleVoice) {
+      this.selectedVoiceId = voiceId;
+      this.googleTTS.selectedLocale = googleVoice.locale;
+      return true;
+    }
+
+    const edgeVoice = NEURAL_VOICES.find((v) => v.id === voiceId);
+    if (edgeVoice) {
+      this.selectedVoiceId = voiceId;
       this.edgeTTS.selectedVoiceId = voiceId;
       return true;
     }
+
     return false;
   }
 
@@ -130,8 +157,10 @@ export class VoiceEngine {
    */
   public getActiveVoiceLabel(): string {
     if (this.useNeuralVoice) {
-      const v = NEURAL_VOICES.find((voice) => voice.id === this.edgeTTS.selectedVoiceId);
-      return v ? `${v.name}` : 'Aria (Natural Neural)';
+      const v = ALL_NEURAL_VOICES.find((voice) => voice.id === this.selectedVoiceId);
+      if (v) return v.name;
+      const edgeV = NEURAL_VOICES.find((voice) => voice.id === this.edgeTTS.selectedVoiceId);
+      return edgeV ? edgeV.name : 'Google Natural (US Neural)';
     }
     return this.selectedVoice ? `${this.selectedVoice.name} (${this.selectedVoice.lang})` : 'System Default';
   }
@@ -248,19 +277,48 @@ export class VoiceEngine {
       this.cancel();
     }
 
-    // 1. Primary: Real near-human Neural TTS
-    if (this.useNeuralVoice && typeof window !== 'undefined' && 'WebSocket' in window) {
+    // 1. Primary: Natural Neural Speech Synthesis (Google WaveNet / Edge Neural)
+    if (this.useNeuralVoice && typeof window !== 'undefined') {
+      const selectedVoice = ALL_NEURAL_VOICES.find((v) => v.id === this.selectedVoiceId);
+      const isEdgeRequested = selectedVoice && selectedVoice.engine === 'edge';
+
+      // If user explicitly picked an Edge voice, try EdgeTTS first
+      if (isEdgeRequested && 'WebSocket' in window) {
+        try {
+          this.isSpeaking = true;
+          if (this.onStartCallback) this.onStartCallback(text);
+          if (onSentenceStart) onSentenceStart(text);
+
+          await this.edgeTTS.speak(text, {
+            rate: this.rate,
+            voiceId: this.selectedVoiceId,
+            onStart: () => {
+              this.isSpeaking = true;
+            },
+            onEnd: () => {
+              this.isSpeaking = false;
+              if (this.onEndCallback) this.onEndCallback();
+              if (onComplete) onComplete();
+            },
+          });
+          return;
+        } catch (edgeErr) {
+          console.warn('[VoiceEngine] Edge TTS not supported in current browser session, switching to Google Natural TTS:', edgeErr);
+          this.edgeTTS.stop();
+        }
+      }
+
+      // Google Natural WaveNet Neural Voice (super warm, realistic, works on Chrome / Chromium / Linux)
       try {
         this.isSpeaking = true;
-        if (this.onStartCallback) {
-          this.onStartCallback(text);
-        }
-        if (onSentenceStart) {
-          onSentenceStart(text);
-        }
+        if (this.onStartCallback) this.onStartCallback(text);
+        if (onSentenceStart) onSentenceStart(text);
 
-        await this.edgeTTS.speak(text, {
+        const locale = selectedVoice ? selectedVoice.locale : 'en-US';
+        await this.googleTTS.speak(text, {
           rate: this.rate,
+          volume: this.volume,
+          locale,
           onStart: () => {
             this.isSpeaking = true;
           },
@@ -271,14 +329,14 @@ export class VoiceEngine {
           },
         });
         return;
-      } catch (neuralErr) {
-        console.warn('[VoiceEngine] Neural speech stream note, using Web Speech API fallback:', neuralErr);
-        this.edgeTTS.stop();
+      } catch (googleErr) {
+        console.warn('[VoiceEngine] Natural Neural speech stream note, using Web Speech API fallback:', googleErr);
+        this.googleTTS.stop();
         this.isSpeaking = false;
       }
     }
 
-    // 2. Fallback: Browser local Web Speech API
+    // 2. Fallback: Browser local Web Speech API (if completely offline)
     return this.speakLocal(text, options);
   }
 
@@ -389,6 +447,7 @@ export class VoiceEngine {
    * Instantly stops speech synthesis and clears both neural and local queues.
    */
   public cancel(): void {
+    this.googleTTS.stop();
     this.edgeTTS.stop();
     this.queue = [];
     if (this.synth) {
@@ -402,6 +461,9 @@ export class VoiceEngine {
   }
 
   public pause(): void {
+    if (this.googleTTS.getIsPlaying()) {
+      this.googleTTS.stop();
+    }
     if (this.edgeTTS.getIsPlaying()) {
       this.edgeTTS.stop();
     }

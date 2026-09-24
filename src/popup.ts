@@ -96,7 +96,7 @@ export class PopupController {
   private async initVoiceSelector(): Promise<void> {
     try {
       if (this.dom.voiceSelect) {
-        this.dom.voiceSelect.value = this.voiceEngine.edgeTTS.selectedVoiceId;
+        this.dom.voiceSelect.value = this.voiceEngine.selectedVoiceId;
         this.dom.voiceSelect.addEventListener('change', () => {
           const val = this.dom.voiceSelect.value;
           if (val === 'system') {

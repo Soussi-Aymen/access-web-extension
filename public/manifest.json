@@ -10,8 +10,9 @@
     "declarativeNetRequest"
   ],
   "host_permissions": [
+    "https://translate.google.com/*",
     "https://speech.platform.bing.com/*",
-    "wss://speech.platform.bing.com/*"
+    "*://speech.platform.bing.com/*"
   ],
   "declarative_net_request": {
     "rule_resources": [
